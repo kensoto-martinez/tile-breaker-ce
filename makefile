@@ -3,7 +3,7 @@
 # ----------------------------
 
 NAME = Tilebrkr
-DESCRIPTION = "Break tiles using upgradable balls!"
+DESCRIPTION = "Break some tiles!"
 COMPRESSED = NO
 
 CFLAGS = -Wall -Wextra -Oz
