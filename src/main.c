@@ -17,6 +17,7 @@ int main(void)
         gfx_SwapDraw();
     }
 
+    game_save();
     gfx_End();
     return 0;
 }
