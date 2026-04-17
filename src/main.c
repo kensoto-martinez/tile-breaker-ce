@@ -9,11 +9,8 @@ int main(void)
 
     while (1) {
         kb_Scan();
-        if (kb_IsDown(kb_KeyClear)) {
-            break;
-        }
 
-        game_draw();
+        if (!game_draw()) break;
         gfx_SwapDraw();
     }
 

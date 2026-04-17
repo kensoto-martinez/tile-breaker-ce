@@ -4,7 +4,7 @@
 #include <graphx.h>
 #include <keypadc.h>
 
-#define SAVE_NAME "TLEBRKRSAVE"
+#define SAVE_NAME "TBKRSAVE"
 
 #define MENU_BACKGROUND_MARGIN 30
 #define COLOR_BASE 16
@@ -17,11 +17,11 @@
 #define ADDITIONAL_SPEED_PPS 20
 #define SPEED_LEVEL_MAX 10
 #define FIRE_TICK_SEC 1
-#define FIRE_TICK_TRIGGER (int)32768 / (1 / FIRE_TICK_SEC)
+#define FIRE_TICK_TRIGGER 32768 * FIRE_TICK_SEC
 #define FIRE_SPREAD_CHANCE_PCNT 20 //per fire tick
 #define MAX_BALLS 20
-#define ROWS 11
-#define COLS 9
+#define ROWS 12
+#define COLS 10
 #define TILE_MARGIN_Y 15
 #define TILE_AREA_Y (GFX_LCD_HEIGHT - TILE_MARGIN_Y * 2) //TILE_MARGIN_Y * 2 for the top and bottom margins
 #define TILE_W (GFX_LCD_WIDTH / COLS)
@@ -54,7 +54,7 @@ typedef struct {
 
 typedef struct {
     uint16_t health;
-    int on_fire;
+    uint8_t on_fire;
 } Tile;
 
 typedef struct {
@@ -62,13 +62,16 @@ typedef struct {
     int y;
 } Cursor;
 
+#pragma pack(push, 1)
 typedef struct {
     uint64_t money;
+    Tile tiles[ROWS][COLS];
     uint16_t tile_level_health;
     uint8_t  ball_type_counts[5];
     uint8_t  speed_levels[5];
     uint8_t  power_levels[5];
 } SaveData;
+#pragma pack(pop)
 
 typedef enum {
     COLOR_BASIC_BALL        = COLOR_BASE + 10,
@@ -86,6 +89,6 @@ typedef enum {
 
 void game_save(void);
 void game_init(void);
-void game_draw(void);
+int game_draw(void);
 
 #endif

@@ -4,12 +4,12 @@
 
 NAME = tilebrkr
 DESCRIPTION = "Break some tiles!"
-ICON = icon.png
-COMPRESSED = YES
-COMPRESSED_MODE = zx0
 ARCHIVED = YES
-PREFER_OS_CRT = YES
-LTO = NO
+ICON = icon.png
+# COMPRESSED = YES
+# COMPRESSED_MODE = zx0
+# PREFER_OS_CRT = YES
+# LTO = NO
 
 CFLAGS = -Wall -Wextra -Oz
 CXXFLAGS = -Wall -Wextra -Oz
