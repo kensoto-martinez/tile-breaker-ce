@@ -4,7 +4,6 @@
 #include <sys/timers.h>
 #include <sys/rtc.h>
 #include <math.h>
-#include <debug.h>
 #include "game.h"
 
 #define MENU_INNER_Y    (MENU_BACKGROUND_MARGIN + 1)
@@ -13,14 +12,14 @@
 #define MENU_BTN_PAD    3
 #define MENU_BTN_W      (MENU_COL_W - MENU_BTN_PAD * 2)
 #define MENU_BTN_H      13
-#define ROW_BALL_Y      10
-#define ROW_NAME_Y      30
-#define ROW_SPD_BTN_Y   44
+#define ROW_BALL_Y      8
+#define ROW_NAME_Y      24
+#define ROW_SPD_BTN_Y   42
 #define ROW_SPD_LVL_Y   (ROW_SPD_BTN_Y + MENU_BTN_H + 2)
-#define ROW_PWR_BTN_Y   (ROW_SPD_LVL_Y + 10)
+#define ROW_PWR_BTN_Y   (ROW_SPD_LVL_Y + 16)
 #define ROW_PWR_LVL_Y   (ROW_PWR_BTN_Y + MENU_BTN_H + 2)
-#define ROW_BUY_Y       (ROW_PWR_LVL_Y + 10)
-#define ROW_SELL_Y      (ROW_BUY_Y + MENU_BTN_H + 4)
+#define ROW_BUY_Y       (ROW_PWR_LVL_Y + 16)
+#define ROW_SELL_Y      (ROW_BUY_Y + MENU_BTN_H + 16)
 
 static const uint8_t TILE_COLORS[10] = {
     COLOR_BASE,
@@ -63,7 +62,14 @@ static uint8_t tiles_alive = 0;
 static Cursor cursor;
 static uint64_t money = 0;
 static uint8_t menu = MENU_NONE;
-static int cursor_on_any_button = 0;
+static uint8_t cursor_on_any_button = 0;
+static uint64_t cached_buy_prices[5];
+static uint64_t cached_speed_prices[5];
+static uint64_t cached_power_prices[5];
+static uint64_t cached_money = 0xFFFFFFFFFFFFFFFFULL;
+static uint16_t cached_level = 0xFFFF;
+static char cached_money_str[21];
+static char cached_level_str[6];
 
 //game functions
 static int rand_range(int min, int max)
@@ -84,15 +90,12 @@ static int cursor_on_tile(int row, int col)
 static void plasma_damage_tile(int condition, int r, int c, int power)
 {  
     if (condition && tiles[r][c].health != 0) {
-        dbg_printf("1\n");
         if (power >= tiles[r][c].health) {
             tiles[r][c].health = 0;
-            tiles_alive -= 1;
-            dbg_printf("KILLED\n");
+            tiles_alive--;
         }
         else {
             tiles[r][c].health -= power;
-            dbg_printf("2\n");
         }
     }
 }
@@ -105,7 +108,7 @@ static void damage_tile(int r, int c, BallType type, uint8_t power)
     if (power >= tiles[r][c].health) {
         killed_tile = 1;
         tiles[r][c].health = 0;
-        tiles_alive -= 1;
+        tiles_alive--;
 
         //if not plasma or heat, get your money and leave
         if (type != BALL_PLASMA && type != BALL_HEAT) {
@@ -275,6 +278,7 @@ static void update_tiles(void)
         }
     }
 
+    //go to next level once all tiles have been destroyed
     if (tiles_alive == 0) {
         tile_level_health++;
         spawn_tiles();
@@ -380,7 +384,7 @@ static void sniper_seek_closest_tile(Ball *b)
     b->vy = ((int32_t)raw_vy * speed_pps * FP_SCALE) / mag;
 }
 
-static void game_update(void)
+static int game_update(void)
 {
     static uint32_t last_ticks = 0xFFFFFFFF;
     int now = timer_Get(timer_id);
@@ -414,9 +418,9 @@ static void game_update(void)
     if (cursor.y < 0) cursor.y = 0;
     if (cursor.y >= GFX_LCD_HEIGHT) cursor.y = GFX_LCD_HEIGHT - 1;
 
-    //if ENTER pressed, damage tile at cursor
+    //if ENTER or 2ND pressed, damage tile at cursor
     static int enter_is_down = 0;
-    if (kb_IsDown(kb_KeyEnter)) {
+    if (kb_IsDown(kb_KeyEnter) || kb_IsDown(kb_Key2nd)) {
         if (!enter_is_down) {
             int r = (cursor.y - TILE_MARGIN_Y) / TILE_H;
             int c = cursor.x / TILE_W;
@@ -428,7 +432,7 @@ static void game_update(void)
         enter_is_down = 0;
     }
 
-    //if MODE pressed, toggle upgrade menu
+    //if MODE or CLEAR pressed, toggle upgrade menu
     static int mode_is_down = 0;
     if (kb_IsDown(kb_KeyMode)) {
         if (!mode_is_down) {
@@ -443,6 +447,23 @@ static void game_update(void)
     } 
     else {
         mode_is_down = 0;
+    }
+
+    static int clear_is_down = 0;
+    if (kb_IsDown(kb_KeyClear)) {
+        if (!clear_is_down) {
+            if (menu == MENU_UPGRADE) {
+                menu = MENU_NONE;
+            }
+            else if (menu == MENU_NONE) {
+                return 0;
+            }
+
+            clear_is_down = 1;
+        }
+    }
+    else {
+        clear_is_down = 0;
     }
 
     //move and bounce each ball
@@ -468,6 +489,8 @@ static void game_update(void)
 
     //register tile collisions
     update_tiles();
+
+    return 1;
 }
 //game functions
 
@@ -523,10 +546,17 @@ static uint64_t power_price(BallType type, uint8_t next_level)
     return (uint64_t)ceil(BASE[type] * pow(MULT[type], (double)(next_level - 1)));
 }
 
+static void refresh_prices(uint8_t type)
+{
+    cached_buy_prices[type]   = buy_price((BallType)type, ball_type_counts[type] + 1);
+    cached_speed_prices[type] = speed_levels[type] >= SPEED_LEVEL_MAX ? 0 : speed_price((BallType)type, speed_levels[type] + 1);
+    cached_power_prices[type] = power_price((BallType)type, power_levels[type] + 1);
+}
+
 static void format_price(uint64_t value, char *out)
 {
     if (value < 100000) {
-        // normal number
+        //normal number
         uint8_t len = 0;
         char tmp[21];
         do {
@@ -540,7 +570,7 @@ static void format_price(uint64_t value, char *out)
         out[len] = '\0';
     }
     else if (value < 1000000) {
-        // thousands (K)
+        //thousands (K)
         uint32_t v = value / 1000;
         uint8_t len = 0;
         char tmp[10];
@@ -558,9 +588,9 @@ static void format_price(uint64_t value, char *out)
         out[len] = '\0';
     }
     else if (value < 1000000000ULL) {
-        // millions (M) with 1 decimal
+        //millions (M) with 1 decimal
         uint32_t whole = value / 1000000;
-        uint32_t decimal = (value / 100000) % 10; // 1 decimal digit
+        uint32_t decimal = (value / 100000) % 10; //1 decimal digit
 
         uint8_t len = 0;
         char tmp[10];
@@ -583,7 +613,7 @@ static void format_price(uint64_t value, char *out)
         out[len] = '\0';
     }
     else {
-        // billions (B) with 1 decimal
+        //billions (B) with 1 decimal
         uint32_t whole = value / 1000000000ULL;
         uint32_t decimal = (value / 100000000ULL) % 10;
 
@@ -650,7 +680,7 @@ static void render_upgrade_btn(int btn_x, int btn_y, int lv_text_x, int lv_text_
 static void render_buy_btn(int btn_x, int btn_y, uint64_t cost, int enter_pressed, BallType type)
 {
     //renders a buy button with hover-price and affordability color, handles the purchase on enter. returns 1 if hovered
-    uint8_t color = (money >= cost) ? COLOR_BTN_AFFORD : COLOR_BTN_CANT;
+    uint8_t color = (money >= cost && ball_count < MAX_BALLS) ? COLOR_BTN_AFFORD : COLOR_BTN_CANT;
     char label[21];
 
     if (cursor_in_rect(btn_x, btn_y, MENU_BTN_W, MENU_BTN_H)) {
@@ -662,9 +692,10 @@ static void render_buy_btn(int btn_x, int btn_y, uint64_t cost, int enter_presse
     }
     if (render_button(btn_x, btn_y, MENU_BTN_W, MENU_BTN_H, label, color)) {
         cursor_on_any_button = 1;
-        if (enter_pressed && money >= cost) {
+        if (enter_pressed && money >= cost && ball_count < MAX_BALLS) {
             money -= cost;
             spawn_ball(type);
+            refresh_prices(type);
         }
     }
 }
@@ -686,10 +717,14 @@ static void render_upgrade_menu(void)
     static const char *BALL_NAMES[5] = { "Basic", "Plasma", "Sniper", "Heat", "Cannon" };
 
     static int enter_is_down = 0;
-    int enter_pressed = kb_IsDown(kb_KeyEnter) && !enter_is_down;
-    enter_is_down = kb_IsDown(kb_KeyEnter);
+    int enter_pressed = (kb_IsDown(kb_Key2nd) || kb_IsDown(kb_KeyEnter)) && !enter_is_down;
+    enter_is_down = kb_IsDown(kb_Key2nd) || kb_IsDown(kb_KeyEnter);
 
     cursor_on_any_button = 0;
+
+    //render version
+    gfx_SetTextFGColor(0x00);
+    gfx_PrintStringXY("v1.1.0", MENU_BACKGROUND_MARGIN, 200);
 
     for (uint8_t i = 0; i < 5; i++) {
         int col_x  = (MENU_BACKGROUND_MARGIN + 1) + i * MENU_COL_W;
@@ -713,8 +748,8 @@ static void render_upgrade_menu(void)
         //speed upgrade button
         {
             int capped = speed_levels[i] >= SPEED_LEVEL_MAX;
-            uint64_t cost = capped ? 0 : speed_price((BallType)i, speed_levels[i] + 1);
-            render_upgrade_btn(btn_x, MENU_INNER_Y + ROW_SPD_BTN_Y, lv_x,  MENU_INNER_Y + ROW_SPD_LVL_Y, speed_levels[i], capped, cost, "Speed");
+            uint64_t cost = cached_speed_prices[i];
+            render_upgrade_btn(btn_x, MENU_INNER_Y + ROW_SPD_BTN_Y, lv_x, MENU_INNER_Y + ROW_SPD_LVL_Y, speed_levels[i], capped, cost, "Speed");
 
             if (speed_upgrade_purchased(capped, btn_x, enter_pressed, cost)) {
                 //reduce money by price and apply speed to current balls and future balls
@@ -728,20 +763,24 @@ static void render_upgrade_menu(void)
                         balls[b].vy = balls[b].vy / old_spd * new_spd;
                     }
                 }
+                refresh_prices(i);
             }
         }
 
         //power upgrade button
-        uint64_t cost = power_price((BallType)i, power_levels[i] + 1);
-        render_upgrade_btn(btn_x, MENU_INNER_Y + ROW_PWR_BTN_Y, lv_x,  MENU_INNER_Y + ROW_PWR_LVL_Y, power_levels[i], 0, cost, "Power");
-        if (power_upgrade_purchased(btn_x, enter_pressed, cost)) {
-            //reduce money by price and apply power to current balls and future balls
-            money -= cost;
-            power_levels[i]++;
+        {
+            uint64_t cost = cached_power_prices[i];
+            render_upgrade_btn(btn_x, MENU_INNER_Y + ROW_PWR_BTN_Y, lv_x, MENU_INNER_Y + ROW_PWR_LVL_Y, power_levels[i], 0, cost, "Power");
+            if (power_upgrade_purchased(btn_x, enter_pressed, cost)) {
+                //reduce money by price and apply power to current balls and future balls
+                money -= cost;
+                power_levels[i]++;
+                refresh_prices(i);
+            }
         }
 
         //buy button
-        render_buy_btn(btn_x, MENU_INNER_Y + ROW_BUY_Y, buy_price((BallType)i, ball_type_counts[i] + 1), enter_pressed, (BallType)i);
+        render_buy_btn(btn_x, MENU_INNER_Y + ROW_BUY_Y, cached_buy_prices[i], enter_pressed, (BallType)i);
 
         //sell button
         uint8_t has_ball = ball_type_counts[i] > 0;
@@ -755,10 +794,12 @@ static void render_upgrade_menu(void)
 
 
 //main functions
-static void game_load(void)
+static int game_load(void)
 {
+    int prev_game_loaded = 0;
+
     ti_var_t slot = ti_Open(SAVE_NAME, "r");
-    if (!slot) return; //no save file, start fresh
+    if (!slot) return 0; //no save file, start fresh
 
     SaveData s;
     if (ti_Read(&s, sizeof(SaveData), 1, slot) == 1) {
@@ -768,15 +809,23 @@ static void game_load(void)
             speed_levels[i] = s.speed_levels[i];
             power_levels[i] = s.power_levels[i];
         }
-        //re-spawn saved balls
         for (uint8_t i = 0; i < 5; i++) {
             for (uint8_t j = 0; j < s.ball_type_counts[i]; j++) {
                 spawn_ball((BallType)i);
             }
         }
+        for (uint8_t i = 0; i < ROWS; i++) {
+            for (uint8_t j = 0; j < COLS; j++) {
+                tiles[i][j] = s.tiles[i][j];
+                if (s.tiles[i][j].health > 0) tiles_alive++;
+            }
+        }
+
+        prev_game_loaded = 1;
     }
 
     ti_Close(slot);
+    return prev_game_loaded;
 }
 
 void game_save(void)
@@ -788,6 +837,11 @@ void game_save(void)
         s.ball_type_counts[i] = ball_type_counts[i];
         s.speed_levels[i]     = speed_levels[i];
         s.power_levels[i]     = power_levels[i];
+    }
+    for (uint8_t i = 0; i < ROWS; i++) {
+        for (uint8_t j = 0; j < COLS; j++) {
+            s.tiles[i][j] = tiles[i][j];
+        }
     }
 
     ti_var_t slot = ti_Open(SAVE_NAME, "w");
@@ -840,17 +894,15 @@ void game_init(void)
     cursor.x = GFX_LCD_WIDTH / 2;
     cursor.y = GFX_LCD_HEIGHT / 2;
 
-    //spawn in initial tiles
-    spawn_tiles();
-
-    //load previous game if applicable
-    game_load();
+    //load new tiles and prices only if no save state is loaded
+    if (!game_load()) spawn_tiles();
+    for (uint8_t i = 0; i < 5; i++) refresh_prices(i);
 }
 
-void game_draw(void)
+int game_draw(void)
 {
     //update game values
-    game_update();
+    if (!game_update()) return 0;
 
     //render background
     gfx_FillScreen(BACKGROUND_COLOR_GAME);
@@ -860,12 +912,23 @@ void game_draw(void)
     gfx_FillRectangle_NoClip(0, 0, GFX_LCD_WIDTH, TILE_MARGIN_Y);
     gfx_FillRectangle_NoClip(0, TILE_MARGIN_Y + TILE_AREA_Y, GFX_LCD_WIDTH, TILE_MARGIN_Y);
 
-    //render money, level, and ball amount
+    //cache money string only if it changed
+    if (money != cached_money) {
+        cached_money = money;
+        u32_to_str(money, cached_money_str);
+    }
+
+    //cache level string only if it changed
+    if (tile_level_health != cached_level) {
+        cached_level = tile_level_health;
+        u32_to_str(tile_level_health, cached_level_str);
+    }
+
     gfx_SetTextFGColor(0x00);
     gfx_PrintStringXY("Money: ", MARGIN_TEXT_PADDING, MARGIN_TEXT_PADDING);
-    gfx_PrintUInt(money, 1);
+    gfx_PrintString(cached_money_str);
     gfx_PrintString("; Level: ");
-    gfx_PrintUInt(tile_level_health, 1);
+    gfx_PrintString(cached_level_str);
     gfx_PrintString("; Ball count: ");
     //color ball count red if MAX_BALLS
     if (ball_count == MAX_BALLS) gfx_SetTextFGColor(COLOR_BTN_CANT);
@@ -873,7 +936,7 @@ void game_draw(void)
 
     //render keybinds to help user navigate through the game
     gfx_SetTextFGColor(0x00);
-    gfx_PrintStringXY("Upgrade: MODE; Move: Arrows; Quit: CLEAR", MARGIN_TEXT_PADDING, TILE_MARGIN_Y + TILE_AREA_Y + MARGIN_TEXT_PADDING);
+    gfx_PrintStringXY("Upgrade: MODE; Move: ARROWS; Quit: CLEAR", MARGIN_TEXT_PADDING, TILE_MARGIN_Y + TILE_AREA_Y + MARGIN_TEXT_PADDING);
 
     //render tiles
     for (uint8_t r = 0; r < ROWS; r++) {
@@ -884,24 +947,26 @@ void game_draw(void)
             //tile
             int tx = c * TILE_W;
             int ty = TILE_MARGIN_Y + r * TILE_H;
-            gfx_SetColor(TILE_COLORS[(tiles[r][c].health - 1) % 10]);
+            int color_index = TILE_COLORS[(tiles[r][c].health - 1) % 10];
+            gfx_SetColor(color_index);
             gfx_FillRectangle(tx, ty, TILE_W, TILE_H);
 
-            //display health on tile (if tile on fire, surround health with '-')
-            char health_str[16];
-            uint8_t len = u32_to_str(tiles[r][c].health, health_str);
+            //display health on tile
+            char health_str[8];
+            u32_to_str(tiles[r][c].health, health_str);
 
+            //if tile is on fire, add '-' to end of health string
             if (tiles[r][c].on_fire) {
-                // shift right and add dashes
-                for (int i = len; i >= 0; i--) health_str[i + 1] = health_str[i];
-                health_str[0] = '-';
-                health_str[len + 1] = '-';
-                health_str[len + 2] = '\0';
+                uint8_t len = 0;
+                while (health_str[len]) len++;
+                if (len < 7) {
+                    health_str[len] = '-';
+                    health_str[len + 1] = '\0';
+                }
             }
 
-            int text_x = tx + (TILE_W - gfx_GetStringWidth(health_str)) / 2;
-            int text_y = ty + (TILE_H - 8) / 2;
-            gfx_PrintStringXY(health_str, text_x, text_y);
+            gfx_SetTextFGColor(0x00);
+            gfx_PrintStringXY(health_str, tx + 2, ty + 2);
         }
     }
 
@@ -921,7 +986,9 @@ void game_draw(void)
 
     //render cursor
     gfx_SetTextFGColor(COLOR_CURSOR);
-    gfx_SetTextXY(cursor.x - 2, cursor.y - 2); // subtract 2 to roughly center cursor on position
+    gfx_SetTextXY(cursor.x - 2, cursor.y - 2); //subtract 2 to roughly center cursor on position
     gfx_PrintChar(menu == MENU_UPGRADE && cursor_on_any_button ? '^' : '+');
+
+    return 1;
 }
 //main functions
