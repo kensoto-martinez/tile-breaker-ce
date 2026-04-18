@@ -6,16 +6,16 @@ This game uses the <a href="https://github.com/CE-Programming/toolchain">CE C To
 <hr>
 
 ## How the Game Looks
-<img src="media/game.png" alt="Gameplay screenshot" width="200px" height="175px">
+<img src="media/game.png" alt="Gameplay screenshot" width="320px" height="240px">
 
-<img src="media/upgrade.png" alt="Upgrade menu screenshot" width="200px" height="175px">
+<img src="media/menu.png" alt="Upgrade menu screenshot" width="320px" height="240px">
 
-<img src="media/gameplay.mp4" alt="Gameplay video" width="200px" height="175px">
+<img src="media/gameplay.png" alt="Gameplay screen recording" width="320px" height="240px">
 
 <hr>
 
 ## Downloading the Game
-1. Go to the <a href="https://github.com/kensoto-martinez/tile-breaker-ce/releases/tag/v1.0.0">latest release</a> and install the compressed folder.
+1. Go to the <a href="https://github.com/kensoto-martinez/tile-breaker-ce/releases/tag/v1.1.0">latest release</a> and install the compressed folder.
 
 2. The compressed folder contains `clibs.8xg` and `tilebrkr.8xp`. Put these files on your calculator via <a href="https://education.ti.com/en/products/computer-software/ti-connect-ce-sw">TI-Connect CE</a> or an alternative.
 
