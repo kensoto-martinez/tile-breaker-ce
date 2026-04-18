@@ -20,7 +20,7 @@
 #define FIRE_TICK_TRIGGER 32768 * FIRE_TICK_SEC
 #define FIRE_SPREAD_CHANCE_PCNT 20 //per fire tick
 #define MAX_BALLS 20
-#define ROWS 12
+#define ROWS 13
 #define COLS 10
 #define TILE_MARGIN_Y 15
 #define TILE_AREA_Y (GFX_LCD_HEIGHT - TILE_MARGIN_Y * 2) //TILE_MARGIN_Y * 2 for the top and bottom margins
